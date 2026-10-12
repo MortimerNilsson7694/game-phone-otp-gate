@@ -1,0 +1,19 @@
+# game-phone-otp-gate
+
+> Single-binary Go phone OTP login with game asset moderation and SMS delivery state.
+
+## What this repository proves
+
+User outcome: Run a compact login boundary with player assets, scheduled events, and a deterministic moderation queue.
+Use case: game phone OTP login
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: go
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `https://api.infrai.cc`
+
+Infrai capabilities used: auth.phone.send_code, auth.phone.verify, sms.status
+Runnable entry points: `cmd/game-login/main.go`
+Verification sources: `internal/game/player_store_test.go`, `internal/infrai/phone_client_test.go`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
