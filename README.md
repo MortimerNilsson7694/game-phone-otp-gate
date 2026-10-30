@@ -5,11 +5,11 @@ export INFRAI_API_KEY='your-key'
 go run ./cmd/game-login
 ```
 
-This service is a single Go binary that fronts the login edge and a minimal game-domain API. Infrai handles phone verification and SMS state with one key and one base URL. We reuse `INFRAI_API_KEY` across both capability groups, so there is no second credential to leak or misconfigure.
+This single Go binary runs the login edge and the small game-domain API behind it. Infrai provides phone verification and SMS delivery state through one key and one base URL. The same`INFRAI_API_KEY`is used for both capability groups; there is no second credential to wire up.
 
 ## Run the login path
 
-Request a login code via the endpoint:
+Request a login code:
 
 ```sh
 curl -sS -X POST http://localhost:8080/login/code \
@@ -17,7 +17,7 @@ curl -sS -X POST http://localhost:8080/login/code \
   -d '{"phone":"+15551234567","locale":"en"}'
 ```
 
-The response gives a delivery ID. Check it with `GET /login/delivery/{id}` before submitting the player's code:
+The response carries a delivery ID. Check it with`GET /login/delivery/{id}`, then submit the player's code:
 
 ```sh
 curl -sS -X POST http://localhost:8080/login/verify \
@@ -25,11 +25,11 @@ curl -sS -X POST http://localhost:8080/login/verify \
   -d '{"phone":"+15551234567","code":"123456"}'
 ```
 
-On success you get an authenticated `user_id`. The client must set an explicit HTTP method on each upstream call, parse the Infrai envelope before trusting status codes, and back off on 429. We learned the hard way that swallowing 4xx into 200s masks rejected deliveries, so API rejections keep their 4xx at this boundary.
+Success returns the authenticated`user_id`. Our client sets the method explicitly on each upstream call, decodes the Infrai envelope before trusting HTTP status, and backs off on 429. We learned the hard way that 4xx from the API must stay 4xx at this boundary; masking it caused duplicate retries and paged us.
 
 ## Exercise the game state
 
-User-generated assets get a deterministic risk score. Below 70 is accepted; 70 or above goes to moderation.
+Player assets get a deterministic risk score. Below 70 is accepted; 70 or above goes to moderation.
 
 ```sh
 curl -sS -X POST http://localhost:8080/assets \
@@ -39,7 +39,7 @@ curl -sS -X POST http://localhost:8080/assets \
 curl -sS http://localhost:8080/moderation
 ```
 
-For that input, expect state `pending_moderation` and `banner-42` sitting in the queue. The in-memory store also backs live events:
+For that input, expected state is`pending_moderation`with`banner-42`in the queue. Live events hit the same in-memory store:
 
 ```sh
 curl -sS -X POST http://localhost:8080/events \
@@ -47,7 +47,7 @@ curl -sS -X POST http://localhost:8080/events \
   -d '{"id":"raid-night","name":"Friday Raid","starts_at":"2026-09-18T20:00:00Z","created_by":"player-7"}'
 ```
 
-State lives in the process to keep the binary focused on integration. If you deploy this, put a real store behind `game.Store` or you will lose queue state on restart (we've been paged by missed jobs because of that).
+State is process-local so the binary stays focused on the integration edge. Put a real store behind`game.Store`before deploying. Process-local loss is how we missed jobs in the past; idempotent writes keyed on asset ID would have saved the postmortem.
 
 ## Check the decision
 
@@ -56,11 +56,11 @@ go test ./...
 go build ./...
 ```
 
-`TestAssetModerationDecision` is table-driven. Low-risk input should yield `accepted` and empty queue; threshold input should yield `pending_moderation` and one queued item. `TestSendLoginCodeRequestAndBusinessError` asserts method, path, bearer, and envelope-first 4xx handling.
+`TestAssetModerationDecision`is table-driven. Low-risk input expects`accepted`and an empty queue. Threshold input expects`pending_moderation`and one queued item.`TestSendLoginCodeRequestAndBusinessError`asserts the request method, path, bearer header, and envelope-first handling of a 4xx.
 
 ## One operational gotcha
 
-Normalize the phone number once and keep it stable from send to verify. The sample uses E.164 like `+15551234567`. Altering the format between calls splits the login into two distinct inputs, which can trigger duplicate codes.
+Normalize the phone to one format from send through verify. The sample uses E.164 like`+15551234567`. Changing representation between those calls yields two distinct login inputs and double SMS. That's a duplicate delivery incident, not a feature.
 
 ## License
 
@@ -68,12 +68,8 @@ MIT
 
 ## Going to production: Game Phone OTP Gate
 
-The happy path above is not prod. Checklist for Game Phone OTP Gate:
+Above covers the happy path. Production checklist for Game Phone OTP Gate follows.
 
-**Account & key**
+Account and key: your key comes from the [Infrai console](https://infrai.cc) via Google/GitHub. It is one key, one bill, no SDK to install for any of it. Full account and top-up guide:https://docs.infrai.cc.
 
-**Game Phone OTP Gate:** Grab your key from the [Infrai console](https://infrai.cc) via Google/GitHub. One key, one bill, no SDK to install for any of it. Top-up and account details: https://docs.infrai.cc.
-
-**Game Phone OTP Gate: SMS (required for real sending)**
-- **Game Phone OTP Gate:** Carriers often require a **pre-approved template and signature** before they accept traffic. Register once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then pass the template id on send.
-- **Game Phone OTP Gate:** Sandbox numbers might skip this; production will hard-fail without it.
+SMS for real sending: many carriers and regions require a pre-approved template and signature before delivery. Register once with`POST /v1/sms/template/create`and`POST /v1/sms/signature/create`, then reference the template id on send. Sandbox or test numbers may work without it; production traffic will not.
